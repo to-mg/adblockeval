@@ -83,10 +83,7 @@ def _build_index(keywords, outputs):
             for symbol in state_symbols[prev_state]:
                 next_state = goto_fn[prev_state, symbol]
                 state = fail_fn[prev_state]
-                while True:
-                    # This implicitly encodes g(0, sigma) != fail
-                    if (state, symbol) in goto_fn or state == 0:
-                        break
+                while not ((state, symbol) in goto_fn or state == 0):
                     state = fail_fn[state]
                 # This implicitly encodes g(0, sigma) != fail
                 fail_value = goto_fn.get((state, symbol), 0)

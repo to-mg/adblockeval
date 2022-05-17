@@ -179,9 +179,13 @@ class RulesIndex:
 
         for rule_index in rule_indexes:
             rule = self.rules[rule_index]
-            if domain_opt_rules is not None and rule.options and rule.options.include_domains:
-                if rule_index not in domain_opt_rules:
-                    continue
+            if (
+                domain_opt_rules is not None
+                and rule.options
+                and rule.options.include_domains
+                and rule_index not in domain_opt_rules
+            ):
+                continue
             yield rule
 
 
@@ -199,16 +203,14 @@ class Rule:
         self.is_exception = False
 
     def match(self, url, netloc, domain, origin=None):
-        if self.options and not self.options.can_apply_rule(domain, origin):
-            return False
-        return True
+        return bool(not self.options or self.options.can_apply_rule(domain, origin))
 
     def __str__(self):
         if self.options:
-            expression_str = '{}${}'.format(self.expression, self.options)
+            expression_str = f'{self.expression}${self.options}'
         else:
             expression_str = self.expression
-        return '@@' + expression_str if self.is_exception else expression_str
+        return f'@@{expression_str}' if self.is_exception else expression_str
 
     def __repr__(self):
         return '{}<{!r}>'.format(self.__class__.__name__, str(self))
@@ -222,9 +224,11 @@ class RegexpRule(Rule):
         self._regexp_obj = regexp_obj
 
     def match(self, url, netloc, domain, origin=None):
-        if not super().match(url, netloc, domain, origin):
-            return False
-        return self._regexp_obj.search(url) is not None
+        return (
+            self._regexp_obj.search(url) is not None
+            if super().match(url, netloc, domain, origin)
+            else False
+        )
 
     def get_keywords(self):
         return RuleKeywords(
@@ -235,14 +239,13 @@ class RegexpRule(Rule):
     def from_expression(cls, expression, options):
         # Expression starts with / and ends with /$
         if not (expression.startswith('/') and expression.endswith('/')):
-            raise RuleParsingError('Not a regular expression rule: {}'.format(expression))
+            raise RuleParsingError(f'Not a regular expression rule: {expression}')
         pattern = expression[1:-1]
         match_case = options.has_included('match-case') if options else False
         try:
-            regexp_obj = re.compile(pattern,
-                                    re.IGNORECASE if not match_case else 0)
+            regexp_obj = re.compile(pattern, 0 if match_case else re.IGNORECASE)
         except re.error:
-            raise RuleParsingError('Invalid regular expression {}'.format(pattern))
+            raise RuleParsingError(f'Invalid regular expression {pattern}')
         return cls(expression, options, regexp_obj)
 
 
@@ -296,7 +299,7 @@ class DomainRule(Rule):
             path = ruleparts[1]
             separator = expression[2+len(domain)]
             if separator == '/':
-                path = '/' + path
+                path = f'/{path}'
         else:
             path = None
 
@@ -410,7 +413,7 @@ class RuleOptions:
         try:
             return bool(mask & self.AVAILABLE_OPTIONS[keyword])
         except KeyError:
-            raise ValueError('Unsupported option keyword: {}'.format(keyword))
+            raise ValueError(f'Unsupported option keyword: {keyword}')
 
     def __str__(self):
         option_str_list = []
@@ -418,13 +421,13 @@ class RuleOptions:
             if self.options_mask & bitmask:
                 option_str_list.append(option)
             if self.options_mask_negative & bitmask:
-                option_str_list.append('~' + option)
+                option_str_list.append(f'~{option}')
         if self.exclude_domains or self.include_domains:
             domain_list = []
             if self.include_domains:
                 domain_list += sorted(self.include_domains)
             if self.exclude_domains:
-                domain_list += sorted('~' + domain for domain in self.exclude_domains)
+                domain_list += sorted(f'~{domain}' for domain in self.exclude_domains)
             option_str_list.append('domain=' + '|'.join(domain_list))
         return ','.join(option_str_list)
 
@@ -451,10 +454,12 @@ class RuleOptions:
                         continue
                     domain_list = include_domains if domain[0] != '~' else exclude_domains
                     domain_list.append(domain if domain[0] != '~' else domain[1:])
-        return cls(include_domains=include_domains if include_domains else None,
-                   exclude_domains=exclude_domains if exclude_domains else None,
-                   options_mask=options_mask,
-                   options_mask_negative=options_mask_negative)
+        return cls(
+            include_domains=include_domains or None,
+            exclude_domains=exclude_domains or None,
+            options_mask=options_mask,
+            options_mask_negative=options_mask_negative,
+        )
 
 
 def _compile_wildcards(expression, prefix='', suffix='', match_case=False, lazy=False):
@@ -470,15 +475,20 @@ def _compile_wildcards(expression, prefix='', suffix='', match_case=False, lazy=
         regex_parts.append(prefix)
     start = 0
     for pos, wildard_type in wildcards:
-        regex_parts.append(re.escape(expression[start:pos]))
-        regex_parts.append('.*' if wildard_type == '*' else '[^a-zA-Z0-9._%-]')
+        regex_parts.extend(
+            (
+                re.escape(expression[start:pos]),
+                '.*' if wildard_type == '*' else '[^a-zA-Z0-9._%-]',
+            )
+        )
+
         start = pos + 1
     if start < len(expression):
         regex_parts.append(re.escape(expression[start:]))
     if suffix:
         regex_parts.append(suffix)
     pattern = ''.join(regex_parts)
-    options = re.IGNORECASE if not match_case else 0
+    options = 0 if match_case else re.IGNORECASE
     return (pattern, options) if lazy else re.compile(pattern, options)
 
 
@@ -547,15 +557,12 @@ def _get_regexp_keywords(pattern):
             continue
         elif kind == 'OPTIONAL':
             if state_was_keyword:
-                # Strip of last character, because something
-                # like foob? only garantuees foo to be present.
-                keyword = keywords.pop()[:-1]
-                if keyword:
+                if keyword := keywords.pop()[:-1]:
                     keywords.append(keyword)
-                # If a whole construct like (foo|bar|qux)? is
-                # optional, we have to remove all keywords again.
+                            # If a whole construct like (foo|bar|qux)? is
+                            # optional, we have to remove all keywords again.
             elif num_pipe_keywords:
-                for i in range(num_pipe_keywords):
+                for _ in range(num_pipe_keywords):
                     keywords.pop()
         state_was_keyword = False
         num_pipe_keywords = 0
