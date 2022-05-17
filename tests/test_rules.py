@@ -84,7 +84,7 @@ class ParsingTest(unittest.TestCase):
         except FileNotFoundError:
             pass
         # Running this test twice will test the cache behavior
-        for i in range(2):
+        for _ in range(2):
             self._test_load_easylist(cache_file)
 
     def _test_load_easylist(self, cache_file):
